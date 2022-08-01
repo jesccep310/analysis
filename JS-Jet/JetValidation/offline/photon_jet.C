@@ -7,7 +7,7 @@ void photon_jet()
   //get our files
   TChain * ct = new TChain("T");  
   for(int i = 0; i < 15000; i++){
-    ct->Add(Form("/sphenix/user/vbailey/MDC2pythiajets/output%i_r04.root",i));
+    ct->Add(Form("/sphenix/user/vbailey/MDC2pythiajets_photonjet/output%i_r04.root",i));
   }
 
 
@@ -81,10 +81,10 @@ void photon_jet()
   int nentries = ct->GetEntries();
   for(int i = 0; i < nentries; i++){
     ct->GetEntry(i);
-
+    
     int nrecojets = pt->size();  
     int nclusters = clusterPt->size();
-
+    
     //get the leading cluster
     int maxCluster = -1;
     float maxClusterPt= 0;
@@ -99,24 +99,88 @@ void photon_jet()
       }
     if(maxCluster < 0) continue;
     h_cluster_pt->Fill(clusterPt->at(maxCluster)); //fill the pt of the leading cluster
-
-    //get the leading jet
+  
     int maxJet = -1;
-    float maxPt = 0;
-    for(int rj = 0; rj < nrecojets; rj++)
-      {
-        if(pt->at(rj) > maxPt)
-          {
-            maxJet = rj;
-            maxPt = pt->at(rj);
-          }
+    float maxJetPt = 0;
+  
+    int njets = truthPt->size();
+    for(int tj = 0; tj < njets; tj++){
+
+      int nrecojets = pt->size();
+      float dR;
+
+    
+      //we already found the max cluster!
+      /*float maxClusterPt = 900; 
+      int nclusters = clusterPt->size();
+      for(int cl = 0; cl < nclusters; cl++)
+	{
+	  if(photonChi->at(cl) > 3) continue;
+	  if(clusterPt->at(cl) > maxClusterPt)
+	    {
+	      maxCluster = cl;
+	      maxClusterPt = clusterPt->at(cl);
+	    }
+	  if(clusterPt->at(cl) < 0.5*truthPt->at(tj)) continue;
+	  }*/
+
+      //instead do something like this
+      float closestClusterdR = 999;
+      int closestCluster = -1;
+      //find the closest cluster to the truth jet
+      for(int cl = 0; cl < nclusters; cl++)
+	{
+	  if(photonChi->at(cl) > 3) continue;
+	  float dEta = truthEta->at(tj) - clusterEta->at(cl);
+	  float dPhi = truthPhi->at(tj) - clusterPhi->at(cl);
+	  while(dPhi > TMath::Pi()) dPhi -= 2*TMath::Pi();
+	  while(dPhi < -TMath::Pi()) dPhi += 2*TMath::Pi();
+	  dR = TMath::Sqrt(dEta*dEta + dPhi*dPhi);
+	  if(dR < closestClusterdR)
+	    {
+	      closestClusterdR = dR;
+	      closestCluster = cl;
+	    }
+	}
+      //skip this truth jet if its got a cluster with >0.5*its pt within dR of 0.2
+      if(closestClusterdR < 0.2 && clusterPt->at(closestCluster) > 0.5*truthPt->at(tj)) continue;
+
+ 
+      //reco to truth jet matching
+      float matchEta, matchPhi, matchPt, matchE, matchsubtracted_et;
+      float dRMax = 100;
+      int matchJet;
+      
+      for(int rj = 0; rj < nrecojets; rj++){
+	float dEta = truthEta->at(tj) - eta->at(rj);
+	float dPhi = truthPhi->at(tj) - phi->at(rj);
+	while(dPhi > TMath::Pi()) dPhi -= 2*TMath::Pi();
+	while(dPhi < -TMath::Pi()) dPhi += 2*TMath::Pi();
+	dR = TMath::Sqrt(dEta*dEta + dPhi*dPhi);
+	if(dR < dRMax){
+	  matchEta = eta->at(rj);
+	  matchPhi = phi->at(rj);
+	  matchPt = pt->at(rj);
+	  matchE = e->at(rj);
+	  matchsubtracted_et = subtracted_et->at(rj);
+	  dRMax = dR;
+	  matchJet = rj;
+	}
       }
-    if(maxJet < 0) continue;
-    h_jet_pt->Fill(pt->at(maxJet)); //fill the pt of the leading jet
-	    
+      //now we have a reco jet which we think is not a photon
+      //check if its the highest pt jet in the event
+      if(matchPt > maxJetPt)
+	{
+	  maxJetPt = matchPt;
+	  maxJet = matchJet;
+	}
+    }
+  
+    if(maxCluster < 0 || maxJet < 0) continue;
+   
     float dEta = clusterEta->at(maxCluster) - eta->at(maxJet);
     float dPhi = clusterPhi->at(maxCluster) - phi->at(maxJet);
-
+    
     //get dphi between -pi and pi
     while (dPhi > TMath::Pi()) dPhi -= 2*TMath::Pi();
     while (dPhi < -TMath::Pi()) dPhi += 2*TMath::Pi();
@@ -124,7 +188,7 @@ void photon_jet()
     float dR = TMath::Sqrt(dEta*dEta + dPhi*dPhi);
 
     h_dPhi->Fill(clusterPt->at(maxCluster), abs(dPhi));
-    
+
     if(abs(dPhi) > 2.9)
       {
 	float response = pt->at(maxJet)/clusterPt->at(maxCluster);
@@ -133,11 +197,26 @@ void photon_jet()
 
   }
 
+
+
+
+
+
+  TCanvas *c = new TCanvas("c","c");
+  c->Print("h1D1plotrecotruthjet.pdf(");
+
+  for (int i = 0; i < pt_N; i++) {
+    h_response->GetXaxis()->SetRange(i+1,i+1);
+    TH1F *h1D = (TH1F*) h_response->ProjectionY();
+    h1D->Draw();
+    c->Print("h1D1plotrecotruthjet.pdf");
+  }
+  c->Print("h1D1plotrecotruthjet.pdf)");
+
   //write out histograms to the output file
-  TFile *f_out = new TFile("photon_jet_hists.root","RECREATE");
+  TFile *f_out = new TFile("photon_jet_histsrecotruthjetdPhi29.root","RECREATE");
   h_jet_pt->Write();
   h_cluster_pt->Write();
   h_response->Write();
   h_dPhi->Write();
 }
-
